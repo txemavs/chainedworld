@@ -1,0 +1,177 @@
+<html>
+<head>
+  <title>Chained World</title>
+  <meta name="description" content="Bitcoin blockchain transactions output experiment">
+</head>
+
+<body onload="main()" style="overflow:hidden;margin:0;height:100%;">
+  <div id="tape">
+    <div id="wrap" style="overflow:hidden; transition-duration: 0.5s">
+      <canvas id="canvas" width="1000" height="800" style="background:black;"></canvas>
+    </div>
+  </div>
+
+  <script>
+    var wrap = document.getElementById("wrap");
+    var canvas = document.getElementById("canvas");
+    var context = canvas.getContext("2d");
+    var color = {"00":"#000000","01":"#FF0000","10":"#00FF00","11":"#0000FF"}
+    var alphabet = '123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ'
+    var trans = Array()
+    var k = 1;
+    var max_trans = 1;
+
+    function binsum(a, b) { 
+      var s = "", d = 0, c = 0;
+      while (a.length!=b.length) { if (a.length>b.length) {b="0"+b} else {a="0"+a} }
+      for(var i = a.length-1;i>=0; i--) {
+        d = parseInt(a.substr(i,1)) + parseInt(b.substr(i,1)) + c;
+        if (d<2) { c = 0 } else { d-=2; c=1 }
+        s=d+s;
+      }
+      if (c==1) {s="1"+s}
+      return s
+    }
+
+    function binmul(a, b){
+      var m = "", x = "";
+      if ((a=="0") || (b=="0")) {return "0"}
+      var t = a.length-1
+      for(var i = t; i>=0; i--){
+        if (a.substr(i,1)==1) {
+          x = b
+          for(var j=0,z=t-i; j<z; j++){ x=x+"0" }
+          m = binsum(m, x)
+        }
+      }
+    return m
+    }
+
+
+    var pow58 = Array()
+    pow58.push("1")
+    pow = "1"
+    b58= "111010";
+    for (x=1;x<37;x++) {
+      pow = binmul(pow, b58)
+      pow58.push(pow)
+    }
+
+
+    function decode58(str) {
+      var p = ""
+      var bin = "0";
+      while (str){
+        var index = alphabet.indexOf(str[0]);
+        var power = str.length - 1;
+        p = binmul(index.toString(2), pow58[power])
+        bin = binsum(bin, p)
+        str = str.substring(1);
+      }
+      while (bin.length<200) { bin="0"+bin }
+      return bin;
+    }
+
+    function colorsq(ctx, x, y, c) {
+      ctx.beginPath();
+      ctx.fillStyle=c;
+      ctx.fillRect(wo+x*sk,y*sk,sk,sk);
+      ctx.stroke();
+    }
+
+    function vline(ctx, y, value) {
+      var v = (sk/2)*Math.log(value)
+      ctx.beginPath();
+      ctx.fillStyle="#ffffff";
+      ctx.fillRect(0,(y+0.25)*sk,v,sk/2);
+      ctx.stroke();
+    }
+
+    function line(op, y) {
+      if (!op) {return}
+      addr_to = op[2]
+      for (var x = 0; x < 100; x++) {
+        b = addr_to.substr(x*2, 2);
+        colorsq(context,x,y-1,color[b] )
+      }
+      vline(context,y-1, op[1] )
+      
+    }
+
+    function redraw() {
+      context.clearRect(0, 0, ww, wh*3);
+      for (var y=0; y<=max_trans; y++) {
+        line(trans[max_trans-y],y);
+      }
+    }
+
+    var ww = 0;
+    var wh = 0;
+    var wo = 0;
+    var ot = 0;
+    var lo = 0;
+    var tapey = 0;
+    var wrapy = 0;
+
+    function onResize(e) {
+      ww = window.innerWidth;
+      wh = window.innerHeight;
+      sk = Math.floor(ww/110);
+      wo = Math.floor((ww-100*sk));
+      wrap.width = ww;
+      wrap.height = wh;
+      canvas.width = ww;
+      canvas.height = wh*3;
+      max_trans = 2*Math.ceil(wh/sk);
+      tapey=-wh;
+      wrapy=0;
+      tape.style.transform="translateY("+tapey+"px)";
+      wrap.style.transform="translateY("+wrapy+"px)";
+      lo=max_trans
+    }
+
+    scripts = {}
+
+    function onMessage(event) {
+      var data = JSON.parse(event.data);
+      if (data.op && data.op=="pong") return; 
+      if (!data.x) {console.log(data)} 
+      var outputs = data.x.out;
+      var newlines = outputs.length;
+      for (var n=0; n<newlines; n++) {
+        addr_from = ""
+        value = outputs[n].value;
+        addr_to = decode58(outputs[n].addr);
+        trans.splice(0,0,[addr_from, value, addr_to]);
+        if (trans.length>max_trans) {trans.pop()}
+        lo+=1;
+        wrapy-=sk
+        ot-=sk;
+        
+        if (ot<-wh) {
+          ot+=wh
+          tapey+=wh;
+          lo=max_trans;
+          redraw()
+        } else {
+          line(trans[0],lo);
+        }
+        tape.style.transform="translateY("+tapey+"px)";
+        wrap.style.transform="translateY("+wrapy+"px)";
+      }
+    }
+
+
+    function main() {
+      onResize();      
+      window.addEventListener("resize", onResize);
+      var bcinfo = new WebSocket("wss://ws.blockchain.info/inv");
+      bcinfo.onopen = function (event) {
+        bcinfo.send(JSON.stringify({"op":"unconfirmed_sub"}));
+      };
+      bcinfo.onmessage = onMessage
+      setInterval(function(){ bcinfo.send(JSON.stringify({"op":"ping"})); }, 30000);
+    }
+
+  </script>
+</body>
